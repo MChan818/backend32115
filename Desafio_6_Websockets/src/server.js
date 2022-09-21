@@ -1,67 +1,48 @@
-var PORT = 6024;
-var MULTICAST_ADDR = '239.255.255.250';
-var dgram = require('dgram');
-var client = dgram.createSocket('udp4');
-let GET_IPADDRESS;
+const express = require('express');
 
+const { Server: HttpServer } = require('http')
+const { Server: Socket } = require('socket.io');
 
-client.on('listening', function () {
-    var address = client.address();
-    console.log('UDP Client listening on ' + address.address + ":" + address.port);
-});
+const InMemoryAPI = require('../api/InMemoryAPI.js');
+const LogArchiveAPI = require('../api/LogArchiveAPI.js');
 
-client.on('message', function (message, rinfo) {
-    console.log('Message from: ' + rinfo.address + ':' + rinfo.port + ' - ' + message);
-    GET_IPADDRESS = rinfo.address;
-});
+const app = express();
+const httpServer = new HttpServer(app)
+const io = new Socket(httpServer)
 
-client.bind(PORT, function () {
-    client.addMembership(MULTICAST_ADDR);   // Add the HOST_IP_ADDRESS for reliability
-});
+let Productos = new InMemoryAPI()
+let Mensajes = new LogArchiveAPI('mensajes.json')
 
-//-------------------------------------------------------------
-//-------------------------------------------------------------
-//-------------------------------------------------------------
-//-------------------------------------------------------------
-//-------------------------------------------------------------
-//-------------------------------------------------------------
+//--------------------------------------------
+io.on('connection', async socket =>{
+    console.log('Usuario conectado!');
+    
+    //Carga inicial de productos
+    socket.emit('productos', Productos.getAll());
 
-// const express = require('express');
-// const fs = require('fs')
-// const { Server: HttpsServer } = require('https')
+    // actualizacion de productos
+    socket.on('update', producto => {
+        Productos.save(producto)
+        io.sockets.emit('productos', Productos.getAll());
+    })
 
-// var credentials = {
-//     key: fs.readFileSync('src/server.key'),
-//     cert: fs.readFileSync('src/server.crt')
-// };
-// //--------------------------------------------
-// const app = express();
-// const httpsServer = new HttpsServer(credentials, app)
-// const io = require('socket.io')(httpsServer, {
-//     cors:{
-//         origin: ["https://192.168.0.15:3000","https://localhost:3000","localhost"],
-//         methods: ["GET","POST"],
-//         credentials: true
-//     }
-// })
-// //--------------------------------------------
-// app.use(express.static('public'))
-// app.use(express.json());
-// app.use(express.urlencoded({extended: true}));
-// //--------------------------------------------
-// io.on('connection', async socket =>{
-//     if(GET_IPADDRESS === null){
-//         return;
-//     }
-//     socket.emit('ip', GET_IPADDRESS);
+    socket.emit('mensajes', await Mensajes.getAll());
 
-// })
+    // actualizacion de mensajes
+    socket.on('nuevoMensaje', async mensaje => {
+        mensaje.hora = new Date().toLocaleString()
+        await Mensajes.save(mensaje)
+        io.sockets.emit('mensajes', await Mensajes.getAll());
+    })
+})
 
-// //--------------------------------------------
+//--------------------------------------------
+app.use(express.static('public'))
+app.use(express.json());
+app.use(express.urlencoded({extended: true}));
 
-
-// const EXPRESSPORT = 8080;
-// const server = httpsServer.listen(EXPRESSPORT, () => {
-//     console.log(`Servidor https escuchando en el puerto ${server.address().port}`)
-// })
-// server.on("error", error => console.log(`Error en servidor ${error}`))
+const PORT = 8080;
+const server = httpServer.listen(PORT, () => {
+    console.log(`Servidor http escuchando en el puerto ${server.address().port}`)
+})
+server.on("error", error => console.log(`Error en servidor ${error}`))
